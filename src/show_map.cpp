@@ -359,9 +359,9 @@ void New_Camera_poses(const geometry_msgs::PoseStamped::ConstPtr& msg4){
      proj[2][0] = NRot[2][0];
      proj[2][1] = NRot[2][1];
      proj[2][2] = NRot[2][2];
-     proj[0][3] = tcw_orb.at<float> (0,0);
-     proj[1][3] = tcw_orb.at<float> (1,0);
-     proj[2][3] = tcw_orb.at<float> (2,0);
+     proj[0][3] = nx_cam;
+     proj[1][3] = ny_cam;
+     proj[2][3] = nz_cam;
 
      cv::Mat Proj = cv::Mat(3, 4, CV_32FC1, &proj);   //same as ORB_slam
      cv::Mat transform = TransformFromMat(Proj);    //gets transformed to rviz format

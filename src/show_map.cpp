@@ -5,6 +5,7 @@
 #include <sensor_msgs/PointCloud.h>
 #include <geometry_msgs/Point32.h>
 #include <geometry_msgs/PoseStamped.h>
+#include <geometry_msgs/PoseArray.h>
 #include <visualization_msgs/MarkerArray.h>
 #include "tf/transform_datatypes.h"
 #include <tf/transform_broadcaster.h>
@@ -78,6 +79,7 @@ public:
 
      std::vector<visualization_msgs::Marker> all_cam_markers;
      std::vector<visualization_msgs::Marker> new_all_cam_markers;
+     std::vector<visualization_msgs::Marker> teach_cam_markers;
 
   //   std::vector<visualization_msgs::Marker> all_markers;
      visualization_msgs::MarkerArray Markerarr;
@@ -85,11 +87,13 @@ public:
      visualization_msgs::MarkerArray New_Markerarr;
      visualization_msgs::MarkerArray New_Posesarr;
      visualization_msgs::MarkerArray teach_Markerarr;
-     visualization_msgs::MarkerArray teach_Posearr;
+     visualization_msgs::MarkerArray teach_Posesarr;
      
 
      geometry_msgs::PoseStamped pose;
-     
+     geometry_msgs::PoseStamped new_pose;
+     geometry_msgs::PoseStamped teach_pose;
+            
      float init_height = 1;
  
 map_show():
@@ -115,8 +119,9 @@ n("~"){
      new_marker_pub_cam_arr = n.advertise<visualization_msgs::MarkerArray>("new_camera_pose_marker_array", 1);
 
      teach_Mo_sub = n.subscribe("/teach_map_objects",1,&map_show::teach_Objects , this);
-//     teach_Kf_sub = n.subscribe("/teach_orb_pose",1,&map_show::New_Camera_poses , this);          
+     teach_Kf_sub = n.subscribe("/teach_orb_pose",1,&map_show::teach_Camera_poses , this);          
      teach_marker_pub_obj = n.advertise<visualization_msgs::MarkerArray>("teach_objects_marker_array", 1);
+     teach_marker_pub_cam_arr = n.advertise<visualization_msgs::MarkerArray>("teach_camera_marker_array", 1);
 
 }
 ~map_show(){}
@@ -272,15 +277,23 @@ void Camera_poses(const geometry_msgs::PoseStamped::ConstPtr& msg2){
      x_cam = msg2->pose.position.x;
      y_cam = msg2->pose.position.y;
      z_cam = msg2->pose.position.z;
+//     cout<<"cur cams are: "<<x_cam<<" "<<y_cam<<" "<<z_cam<<endl;
 
      R[0] = msg2->pose.orientation.x;
      R[1] = msg2->pose.orientation.y;
      R[2] = msg2->pose.orientation.z;
      R[3] = msg2->pose.orientation.w;
 
+//     cout<<"cams poses are: "<<R[0]<<" "<<R[1]<<" "<<R[2]<<" "<<R[3]<<endl;
+
      float Rot[3][3] = {{1-2*(R[1]*R[1])-2*(R[2]*R[2]),2*R[0]*R[1]+2*R[2]*R[3],2*R[0]*R[2]-2*R[1]*R[3]},
                         {2*R[0]*R[1]-2*R[2]*R[3],1-2*(R[0]*R[0])-2*(R[2]*R[2]),2*R[1]*R[2]+2*R[0]*R[3]},
                         {2*R[0]*R[2]+2*R[1]*R[3],2*R[1]*R[2]-2*R[0]*R[3],1-2*(R[0]*R[0])-2*(R[1]*R[1])}};
+
+//     cout<<"Rot is:"<<endl;
+//     cout<<Rot[0][0]<<" "<<Rot[0][1]<<" "<<Rot[0][2]<<endl;
+//     cout<<Rot[1][0]<<" "<<Rot[1][1]<<" "<<Rot[1][2]<<endl;
+//     cout<<Rot[2][0]<<" "<<Rot[2][1]<<" "<<Rot[2][2]<<endl;
 
      cv::Mat Rotation = cv::Mat(3, 3, CV_32FC1, &Rot);
      //cout<<"Rotation is: "<<Rotation<<endl;
@@ -326,19 +339,85 @@ void Camera_poses(const geometry_msgs::PoseStamped::ConstPtr& msg2){
 }
 
 
+void teach_Camera_poses(const geometry_msgs::PoseArray::ConstPtr& msg6){
+     for(size_t i = 0;i<msg6->poses.size();i++){
+     tx_cam = msg6->poses[i].position.x;
+     ty_cam = msg6->poses[i].position.y;
+     tz_cam = msg6->poses[i].position.z;
+
+     TR[0] = msg6->poses[i].orientation.x;
+     TR[1] = msg6->poses[i].orientation.y;
+     TR[2] = msg6->poses[i].orientation.z;
+     TR[3] = msg6->poses[i].orientation.w;
+
+     float Rot[3][3] = {{1-2*(TR[1]*TR[1])-2*(TR[2]*TR[2]),2*TR[0]*TR[1]+2*TR[2]*TR[3],2*TR[0]*TR[2]-2*TR[1]*TR[3]},
+                        {2*TR[0]*TR[1]-2*TR[2]*TR[3],1-2*(TR[0]*TR[0])-2*(TR[2]*TR[2]),2*TR[1]*TR[2]+2*TR[0]*TR[3]},
+                        {2*TR[0]*TR[2]+2*TR[1]*TR[3],2*TR[1]*TR[2]-2*TR[0]*TR[3],1-2*(TR[0]*TR[0])-2*(TR[1]*TR[1])}};
+
+     cv::Mat Rotation = cv::Mat(3, 3, CV_32FC1, &Rot);
+     //cout<<"Rotation is: "<<Rotation<<endl;
+
+     float tcw[3][1] = {{-tx_cam},{-ty_cam},{-tz_cam}};
+     cv::Mat tcw_ros = cv::Mat(3, 1, CV_32FC1, &tcw);
+
+     cv::Mat tcw_orb = Rotation*tcw_ros;
+
+     float proj[3][4];
+
+     proj[0][0] = Rot[0][0];
+     proj[0][1] = Rot[0][1];
+     proj[0][2] = Rot[0][2];
+     proj[1][0] = Rot[1][0];
+     proj[1][1] = Rot[1][1];
+     proj[1][2] = Rot[1][2];
+     proj[2][0] = Rot[2][0];
+     proj[2][1] = Rot[2][1];
+     proj[2][2] = Rot[2][2];
+     proj[0][3] = tcw_orb.at<float> (0,0);
+     proj[1][3] = tcw_orb.at<float> (1,0);
+     proj[2][3] = tcw_orb.at<float> (2,0);
+
+     cv::Mat Proj = cv::Mat(3, 4, CV_32FC1, &proj);   //same as ORB_slam
+     cv::Mat transform = TransformFromMat(Proj);    //gets transformed to rviz format
+     cv::Mat Rwc = transform.rowRange(0,3).colRange(0,3);
+     cv::Mat twc = transform.rowRange(0,3).col(3);
+     vector<float> q = toQuaternion(Rwc);
+
+     tf::Transform new_transform;
+     new_transform.setOrigin(tf::Vector3(twc.at<float>(0, 0), twc.at<float>(0, 1), twc.at<float>(0, 2)));
+
+     tf::Quaternion quaternion(q[0], q[1], q[2], q[3]);
+     new_transform.setRotation(quaternion);
+     tf::poseTFToMsg(new_transform, teach_pose.pose);
+
+     if (twc.at<float>(0, 0) != 0){
+     teach_save_poses(twc.at<float>(0, 0),twc.at<float>(1,0),twc.at<float>(2,0),q);
+     }
+
+     }
+
+     teach_visualize_cam();
+     
+}
+
+
 void New_Camera_poses(const geometry_msgs::PoseStamped::ConstPtr& msg4){
      nx_cam = msg4->pose.position.x;
      ny_cam = msg4->pose.position.y;
      nz_cam = msg4->pose.position.z;
 
+//     cout<<"new cams are: "<<nx_cam<<" "<<ny_cam<<" "<<nz_cam<<endl;
+
      NR[0] = msg4->pose.orientation.x;
      NR[1] = msg4->pose.orientation.y;
      NR[2] = msg4->pose.orientation.z;
      NR[3] = msg4->pose.orientation.w;
+//     cout<<"new cams poses are: "<<NR[0]<<" "<<NR[1]<<" "<<NR[2]<<" "<<NR[3]<<endl;
 
      float NRot[3][3] = {{1-2*(NR[1]*NR[1])-2*(NR[2]*NR[2]),2*NR[0]*NR[1]+2*NR[2]*NR[3],2*NR[0]*NR[2]-2*NR[1]*NR[3]},
                         {2*NR[0]*NR[1]-2*NR[2]*NR[3],1-2*(NR[0]*NR[0])-2*(NR[2]*NR[2]),2*NR[1]*NR[2]+2*NR[0]*NR[3]},
                         {2*NR[0]*NR[2]+2*NR[1]*NR[3],2*NR[1]*NR[2]-2*NR[0]*NR[3],1-2*(NR[0]*NR[0])-2*(NR[1]*NR[1])}};
+
 
      cv::Mat Rotation = cv::Mat(3, 3, CV_32FC1, &NRot);
      //cout<<"Rotation is: "<<Rotation<<endl;
@@ -359,9 +438,13 @@ void New_Camera_poses(const geometry_msgs::PoseStamped::ConstPtr& msg4){
      proj[2][0] = NRot[2][0];
      proj[2][1] = NRot[2][1];
      proj[2][2] = NRot[2][2];
-     proj[0][3] = nx_cam;
-     proj[1][3] = ny_cam;
-     proj[2][3] = nz_cam;
+//     proj[0][3] = nx_cam;
+//    proj[1][3] = ny_cam;
+//     proj[2][3] = nz_cam;
+     proj[0][3] = tcw_orb.at<float> (0,0);
+     proj[1][3] = tcw_orb.at<float> (1,0);
+     proj[2][3] = tcw_orb.at<float> (2,0);
+
 
      cv::Mat Proj = cv::Mat(3, 4, CV_32FC1, &proj);   //same as ORB_slam
      cv::Mat transform = TransformFromMat(Proj);    //gets transformed to rviz format
@@ -374,7 +457,7 @@ void New_Camera_poses(const geometry_msgs::PoseStamped::ConstPtr& msg4){
 
      tf::Quaternion quaternion(nq[0], nq[1], nq[2], nq[3]);
      new_transform.setRotation(quaternion);
-     tf::poseTFToMsg(new_transform, pose.pose);
+     tf::poseTFToMsg(new_transform, new_pose.pose);
 
      if (twc.at<float>(0, 0) != 0){
      new_save_poses(twc.at<float>(0, 0),twc.at<float>(1,0),twc.at<float>(2,0),nq);
@@ -410,8 +493,38 @@ void save_poses(float x_cam, float y_cam, float z_cam, vector<float> q){
      marker_cam.color.a = 1.0f;
      marker_cam.lifetime = ros::Duration();
      all_cam_markers.push_back(marker_cam);
-     cout<<"size of cam poses are: "<<all_cam_markers.size()<<endl; 
+//     cout<<"size of cam poses are: "<<all_cam_markers.size()<<endl; 
 }
+
+void teach_save_poses(float x_cam, float y_cam, float z_cam, vector<float> q){
+
+     visualization_msgs::Marker marker_cam;
+     marker_cam.header.stamp = ros::Time();
+     marker_cam.header.frame_id = "world";
+     marker_cam.ns = "camera";
+     marker_cam.id = 1;
+     marker_cam.type = visualization_msgs::Marker::ARROW;
+     marker_cam.action = visualization_msgs::Marker::ADD;
+    // cout<<x_cam<<" "<<y_cam<<" "<<z_cam<<endl;
+     marker_cam.pose.position.x = x_cam;
+     marker_cam.pose.position.y = y_cam;
+     marker_cam.pose.position.z = z_cam+init_height;
+     marker_cam.pose.orientation.x = q[0];
+     marker_cam.pose.orientation.y = q[1];
+     marker_cam.pose.orientation.z = q[2];
+     marker_cam.pose.orientation.w = q[3];
+     marker_cam.scale.x = 0.1;
+     marker_cam.scale.y = 0.025;
+     marker_cam.scale.z = 0.025;
+     marker_cam.color.r = 1.0f;
+     marker_cam.color.g = 0.0f;
+     marker_cam.color.b = 0.0f;
+     marker_cam.color.a = 1.0f;
+     marker_cam.lifetime = ros::Duration();
+     teach_cam_markers.push_back(marker_cam);
+ //    cout<<"size of cam poses are: "<<teach_cam_markers.size()<<endl; 
+}
+
 
 
 
@@ -441,7 +554,7 @@ void new_save_poses(float x_cam, float y_cam, float z_cam, vector<float> q){
      new_marker_cam.color.a = 1.0f;
      new_marker_cam.lifetime = ros::Duration();
      new_all_cam_markers.push_back(new_marker_cam);
-     cout<<"size of cam poses are: "<<new_all_cam_markers.size()<<endl; 
+//     cout<<"size of cam poses are: "<<new_all_cam_markers.size()<<endl; 
 }
 
 
@@ -612,14 +725,48 @@ void visualize_cam()
           Posesarr.markers[i].scale.x = cur_cam.scale.x;
           Posesarr.markers[i].scale.y = cur_cam.scale.y;
           Posesarr.markers[i].scale.z = cur_cam.scale.z;
-          Posesarr.markers[i].color.r = 1.0f;
-          Posesarr.markers[i].color.g = 0.0f;
+          Posesarr.markers[i].color.r = 0.0f;
+          Posesarr.markers[i].color.g = 1.0f;
           Posesarr.markers[i].color.b = 0.0f;
           Posesarr.markers[i].color.a = 1.0f;
           Posesarr.markers[i].lifetime = ros::Duration();
      }
      marker_pub_cam_arr.publish(Posesarr);
 }
+
+
+void teach_visualize_cam()
+{
+     teach_Posesarr.markers.resize(teach_cam_markers.size());
+     for(size_t i=0;i<teach_cam_markers.size();i++){
+
+          visualization_msgs::Marker cur_cam = teach_cam_markers[i];
+          teach_Posesarr.markers[i].header.stamp = ros::Time();
+          teach_Posesarr.markers[i].header.frame_id = "world";
+          teach_Posesarr.markers[i].ns = "camera";
+          teach_Posesarr.markers[i].id = i;
+          teach_Posesarr.markers[i].type = visualization_msgs::Marker::ARROW;
+          teach_Posesarr.markers[i].action = visualization_msgs::Marker::ADD;
+          teach_Posesarr.markers[i].pose.position.x = cur_cam.pose.position.x;
+          teach_Posesarr.markers[i].pose.position.y = cur_cam.pose.position.y;
+          teach_Posesarr.markers[i].pose.position.z = cur_cam.pose.position.z;
+          teach_Posesarr.markers[i].pose.orientation.x = cur_cam.pose.orientation.x;
+          teach_Posesarr.markers[i].pose.orientation.y = cur_cam.pose.orientation.y;
+          teach_Posesarr.markers[i].pose.orientation.z = cur_cam.pose.orientation.z;
+          teach_Posesarr.markers[i].pose.orientation.w = cur_cam.pose.orientation.w;
+          teach_Posesarr.markers[i].scale.x = cur_cam.scale.x;
+          teach_Posesarr.markers[i].scale.y = cur_cam.scale.y;
+          teach_Posesarr.markers[i].scale.z = cur_cam.scale.z;
+          teach_Posesarr.markers[i].color.r = 1.0f;
+          teach_Posesarr.markers[i].color.g = 0.0f;
+          teach_Posesarr.markers[i].color.b = 0.0f;
+          teach_Posesarr.markers[i].color.a = 1.0f;
+          teach_Posesarr.markers[i].lifetime = ros::Duration();
+     }
+     teach_marker_pub_cam_arr.publish(teach_Posesarr);
+     teach_cam_markers.clear();
+}
+
 
 
 void new_visualize_cam()
